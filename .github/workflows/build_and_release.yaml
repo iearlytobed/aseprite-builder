@@ -24,8 +24,9 @@ jobs:
         with:
             group: aseprite
             repo: aseprite
-            match: Aseprite-.*?-Source.zip
-
+            # match: Aseprite-.*?-Source.zip
+            match: Aseprite-.*?beta.*?-Source.zip
+            
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
