@@ -98,16 +98,16 @@ jobs:
 
       # 创建 Release 并上传 zip
       - name: Upload release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: aseprite/build/bin/Aseprite-*.zip
-          asset_name: Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
-          tag: ${{ github.event.inputs.branch }}-${{ github.run_number }}
-          release_name: "Aseprite build from ${{ github.event.inputs.branch }} (run #${{ github.run_number }})"
-          body: |
-            自动构建的测试版 Aseprite
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: aseprite/build/bin/Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
+        asset_name: Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
+        tag: ${{ github.event.inputs.branch }}-${{ github.run_number }}
+        release_name: "Aseprite build from ${{ github.event.inputs.branch }} (run #${{ github.run_number }})"
+        body: |
+          自动构建的测试版 Aseprite
             - 分支/标签: ${{ github.event.inputs.branch }}
             - 构建类型: ${{ env.BUILD_TYPE }}
             - 触发时间: ${{ github.event.repository.updated_at }}
-          overwrite: false
+        overwrite: false
