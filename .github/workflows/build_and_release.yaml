@@ -1,12 +1,12 @@
-name: Build Aseprite (Custom Branch)
+name: Build Aseprite (Official Release Source)
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'Aseprite 源码分支或标签（如 main, v1.3-beta1）'
+      tag:
+        description: '官方 Release 标签（如 v1.3.18-beta3, v1.3.17）'
         required: true
-        default: 'main'
+        default: 'v1.3.18-beta3'
       build_type:
         description: '编译类型 (Release 或 Debug)'
         required: true
@@ -14,6 +14,7 @@ on:
 
 env:
   BUILD_TYPE: ${{ github.event.inputs.build_type }}
+  ASE_TAG: ${{ github.event.inputs.tag }}
 
 jobs:
   build-aseprite:
@@ -25,11 +26,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone Aseprite source
+      # 1. 下载官方 Release 源码包（不是 git clone）
+      - name: Download source code for tag
         shell: bash
         run: |
-          git clone --recurse-submodules -j8 https://github.com/aseprite/aseprite --branch ${{ github.event.inputs.branch }} aseprite
+          # 下载对应 tag 的源码 zip
+          wget https://github.com/aseprite/aseprite/archive/refs/tags/${{ env.ASE_TAG }}.zip -O aseprite-src.zip
+          # 解压
+          unzip aseprite-src.zip
+          # 解压后的目录名通常是 aseprite-版本号，重命名为 aseprite
+          mv aseprite-* aseprite
+          # 进入目录，初始化子模块（官方源码包不包含子模块）
+          cd aseprite
+          git init
+          git submodule update --init --recursive
 
+      # 2. 下载 Skia（Windows 版本）
       - name: Download Skia for Windows
         working-directory: aseprite
         shell: bash
@@ -38,10 +50,13 @@ jobs:
           wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip
           unzip Skia-Windows-Release-x64.zip -d skia
 
+      # 3. 安装 Ninja
       - uses: aseprite/get-ninja@main
 
+      # 4. 设置 MSVC 环境
       - uses: ilammy/msvc-dev-cmd@v1
 
+      # 5. 生成 CMake 构建文件
       - name: Generate Makefiles
         shell: bash
         working-directory: aseprite
@@ -61,45 +76,48 @@ jobs:
             -DOPENSSL_USE_STATIC_LIBS=ON \
             -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-$skia_arch)
 
+      # 6. 编译
       - name: Compile with Ninja
         shell: bash
         working-directory: aseprite
         run: |
           cd build && ninja
 
+      # 7. 清理构建输出，只保留可执行文件和 data
       - name: Clean up build output
         working-directory: aseprite/build/bin
         shell: bash
         run: |
           find . -mindepth 1 ! \( -name 'aseprite.exe' -o -name 'data' -prune \) -exec rm -rf {} +
 
+      # 8. 创建便携标记文件
       - name: Create portable marker
         working-directory: aseprite/build/bin
         shell: bash
         run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
 
-      # 使用 PowerShell 打包（更可靠），并输出文件列表用于调试
+      # 9. 打包成 zip（使用 PowerShell）
       - name: Package artifacts
         working-directory: aseprite/build/bin
         shell: powershell
         run: |
-          $zipName = "Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip"
+          $zipName = "Aseprite-${{ env.ASE_TAG }}-${{ env.BUILD_TYPE }}-Windows.zip"
           Compress-Archive -Path * -DestinationPath $zipName -CompressionLevel Optimal
           Write-Host "Created: $zipName"
           Get-ChildItem -Filter "*.zip"
 
-      # 上传时直接指定准确的文件名（不使用通配符）
+      # 10. 上传到 Release（使用 tag 作为发布标识）
       - name: Upload release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: aseprite/build/bin/Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
-          asset_name: Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
-          tag: ${{ github.event.inputs.branch }}-${{ github.run_number }}
-          release_name: "Aseprite build from ${{ github.event.inputs.branch }} (run #${{ github.run_number }})"
+          file: aseprite/build/bin/Aseprite-${{ env.ASE_TAG }}-${{ env.BUILD_TYPE }}-Windows.zip
+          asset_name: Aseprite-${{ env.ASE_TAG }}-${{ env.BUILD_TYPE }}-Windows.zip
+          tag: ${{ env.ASE_TAG }}-${{ github.run_number }}
+          release_name: "Aseprite ${{ env.ASE_TAG }} (${{ env.BUILD_TYPE }}) build #${{ github.run_number }}"
           body: |
-            自动构建的测试版 Aseprite
-            - 分支/标签: ${{ github.event.inputs.branch }}
+            从官方 Release 源码构建的 Aseprite
+            - 版本: ${{ env.ASE_TAG }}
             - 构建类型: ${{ env.BUILD_TYPE }}
-            - 触发时间: ${{ github.event.repository.updated_at }}
+            - 构建时间: ${{ github.event.repository.updated_at }}
           overwrite: false
