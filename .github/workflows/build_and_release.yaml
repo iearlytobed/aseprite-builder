@@ -1,4 +1,4 @@
-name: Build Aseprite (Official Release Source)
+name: Build Aseprite (Tagged Release)
 
 on:
   workflow_dispatch:
@@ -26,25 +26,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. 下载官方 Release 源码包（PowerShell）
-      - name: Download source code for tag
-        shell: powershell
+      # 1. 克隆指定标签（包含所有子模块）
+      - name: Clone Aseprite source with submodules
+        shell: bash
         run: |
-          $url = "https://github.com/aseprite/aseprite/archive/refs/tags/${{ env.ASE_TAG }}.zip"
-          $zipPath = "aseprite-src.zip"
-          Write-Host "Downloading $url ..."
-          Invoke-WebRequest -Uri $url -OutFile $zipPath
-          Write-Host "Extracting ..."
-          Expand-Archive -Path $zipPath -DestinationPath .
-          # 解压后的目录名类似 aseprite-1.3.18-beta3，将其重命名为 aseprite
-          $srcDir = Get-ChildItem -Directory -Filter "aseprite-*" | Select-Object -First 1
-          Rename-Item -Path $srcDir.FullName -NewName "aseprite"
-          # 进入目录并初始化子模块
+          git clone --recurse-submodules --branch ${{ env.ASE_TAG }} https://github.com/aseprite/aseprite aseprite
+          # 进入目录
           cd aseprite
-          git init
-          git submodule update --init --recursive
+          # 强制将版本号文件中的 "1.x-dev" 替换为实际的标签名
+          # 注意：标签名通常以 'v' 开头，如 v1.3.18-beta3，我们去掉 'v' 保留数字部分
+          # 但官方 CMakeLists 中版本号格式为 "1.3.18-beta3"，去掉 v 前缀
+          VERSION=${ASE_TAG#v}   # 去掉开头的 v
+          sed -i "s/1.x-dev/$VERSION/g" src/ver/CMakeLists.txt
 
-      # 2. 下载 Skia（Windows 版本，使用 PowerShell）
+      # 2. 下载 Skia（Windows 版本，PowerShell）
       - name: Download Skia for Windows
         working-directory: aseprite
         shell: powershell
@@ -62,7 +57,7 @@ jobs:
       # 4. 设置 MSVC 环境
       - uses: ilammy/msvc-dev-cmd@v1
 
-      # 5. 生成 CMake 构建文件
+      # 5. 生成 CMake 构建文件（增加调试输出）
       - name: Generate Makefiles
         shell: bash
         working-directory: aseprite
@@ -71,6 +66,12 @@ jobs:
           export laf_backend=skia
           export enable_scripting=on
           export skia_arch=x64
+
+          # 打印关键路径用于调试
+          echo "SKIA_DIR = $(realpath skia)"
+          echo "SKIA_LIBRARY_DIR = $(realpath skia/out/Release-$skia_arch)"
+          ls -la skia
+          ls -la skia/out/Release-$skia_arch || true
 
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
@@ -89,7 +90,7 @@ jobs:
         run: |
           cd build && ninja
 
-      # 7. 清理构建输出，只保留可执行文件和 data
+      # 7. 清理构建输出（只保留 aseprite.exe 和 data）
       - name: Clean up build output
         working-directory: aseprite/build/bin
         shell: bash
@@ -102,7 +103,7 @@ jobs:
         shell: bash
         run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
 
-      # 9. 打包成 zip（使用 PowerShell）
+      # 9. 打包成 zip
       - name: Package artifacts
         working-directory: aseprite/build/bin
         shell: powershell
@@ -122,7 +123,7 @@ jobs:
           tag: ${{ env.ASE_TAG }}-${{ github.run_number }}
           release_name: "Aseprite ${{ env.ASE_TAG }} (${{ env.BUILD_TYPE }}) build #${{ github.run_number }}"
           body: |
-            从官方 Release 源码构建的 Aseprite
+            从 Git 标签构建的 Aseprite（版本号已修正）
             - 版本: ${{ env.ASE_TAG }}
             - 构建类型: ${{ env.BUILD_TYPE }}
             - 构建时间: ${{ github.event.repository.updated_at }}
