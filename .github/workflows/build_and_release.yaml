@@ -18,36 +18,30 @@ env:
 jobs:
   build-aseprite:
     name: Build Aseprite
-    runs-on: windows-latest          # 目前仅构建 Windows 版本
+    runs-on: windows-latest
     permissions:
-      contents: write                # 用于创建 Release 和上传 assets
+      contents: write
 
     steps:
-      # 检出当前仓库（仅用于获取工作流文件本身，不必须）
       - uses: actions/checkout@v4
 
-      # 克隆 Aseprite 源码（指定分支/标签）
       - name: Clone Aseprite source
         shell: bash
         run: |
           git clone --recurse-submodules -j8 https://github.com/aseprite/aseprite --branch ${{ github.event.inputs.branch }} aseprite
 
-      # 下载 Skia 预编译库（Windows x64）
       - name: Download Skia for Windows
         working-directory: aseprite
         shell: bash
         run: |
-          choco install wget -y --no-progress   # 确保 wget 可用（Windows 自带 curl，也可用 curl）
+          choco install wget -y --no-progress
           wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip
           unzip Skia-Windows-Release-x64.zip -d skia
 
-      # 安装 Ninja（使用 aseprite/get-ninja action）
       - uses: aseprite/get-ninja@main
 
-      # 设置 MSVC 编译环境（Windows）
       - uses: ilammy/msvc-dev-cmd@v1
 
-      # 生成 CMake 构建文件（使用 Ninja）
       - name: Generate Makefiles
         shell: bash
         working-directory: aseprite
@@ -67,47 +61,45 @@ jobs:
             -DOPENSSL_USE_STATIC_LIBS=ON \
             -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-$skia_arch)
 
-      # 开始编译
       - name: Compile with Ninja
         shell: bash
         working-directory: aseprite
         run: |
           cd build && ninja
 
-      # 清理构建目录，只保留可执行文件和 data 文件夹
       - name: Clean up build output
         working-directory: aseprite/build/bin
         shell: bash
         run: |
-          # 保留 aseprite.exe 和 data 目录，删除其他无关文件
           find . -mindepth 1 ! \( -name 'aseprite.exe' -o -name 'data' -prune \) -exec rm -rf {} +
 
-      # 创建便携版标记文件（使 Aseprite 以便携模式运行）
       - name: Create portable marker
         working-directory: aseprite/build/bin
         shell: bash
         run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
 
-      # 打包成 zip 文件，名称包含分支名和构建类型
+      # 使用 PowerShell 打包（更可靠），并输出文件列表用于调试
       - name: Package artifacts
         working-directory: aseprite/build/bin
-        shell: bash
+        shell: powershell
         run: |
-          ZIP_NAME="Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip"
-          7z a -tzip "$ZIP_NAME" *
+          $zipName = "Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip"
+          Compress-Archive -Path * -DestinationPath $zipName -CompressionLevel Optimal
+          Write-Host "Created: $zipName"
+          Get-ChildItem -Filter "*.zip"
 
-      # 创建 Release 并上传 zip
+      # 上传时直接指定准确的文件名（不使用通配符）
       - name: Upload release
-      uses: svenstaro/upload-release-action@v2
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: aseprite/build/bin/Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
-        asset_name: Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
-        tag: ${{ github.event.inputs.branch }}-${{ github.run_number }}
-        release_name: "Aseprite build from ${{ github.event.inputs.branch }} (run #${{ github.run_number }})"
-        body: |
-          自动构建的测试版 Aseprite
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: aseprite/build/bin/Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
+          asset_name: Aseprite-${{ github.event.inputs.branch }}-${{ env.BUILD_TYPE }}-Windows.zip
+          tag: ${{ github.event.inputs.branch }}-${{ github.run_number }}
+          release_name: "Aseprite build from ${{ github.event.inputs.branch }} (run #${{ github.run_number }})"
+          body: |
+            自动构建的测试版 Aseprite
             - 分支/标签: ${{ github.event.inputs.branch }}
             - 构建类型: ${{ env.BUILD_TYPE }}
             - 触发时间: ${{ github.event.repository.updated_at }}
-      overwrite: false
+          overwrite: false
